@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planificateur d'oraux</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:ital,wght@0,300;0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f4f1e8;
+  --surface: #ffffff;
+  --surface2: #ede9dc;
+  --border: #d0cab8;
+  --text: #1c1a15;
+  --muted: #6b6357;
+  --accent: #1d3557;
+  --accent2: #2a4a7f;
+  --accent-bg: #e8eef6;
+  --green: #1e6644;
+  --green-bg: #d8f0e2;
+  --amber: #7c4a00;
+  --amber-bg: #fef0d0;
+  --red: #8b1f1f;
+  --red-bg: #fce8e8;
+  --blue: #0d3b6e;
+  --blue-bg: #ddeeff;
+  --morning-bg: #1d3557;
+  --afternoon-bg: #3d1f5c;
+  --pause-bg: #fef9eb;
+  --pause-border: #e8d080;
+  --lunch-bg: #f0ece0;
+  --radius: 8px;
+  --shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Source Sans 3', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── Header ── */
+header {
+  background: var(--accent);
+  color: white;
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.25);
+}
+header h1 {
+  font-family: 'Libre Baskerville', serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+#headerMeta {
+  font-size: 0.82rem;
+  opacity: 0.65;
+  margin-left: auto;
+  text-align: right;
+  line-height: 1.4;
+}
+
+/* ── Main layout ── */
+main { max-width: 1060px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
+
+/* ── Step tabs ── */
+.steps {
+  display: flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 1.75rem;
+  box-shadow: var(--shadow);
+}
+.step-btn {
+  flex: 1;
+  padding: 0.7rem 0.5rem;
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: background 0.15s, color 0.15s;
+}
+.step-btn:last-child { border-right: none; }
+.step-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+.step-btn.active { background: var(--accent); color: white; }
+.step-num {
+  width: 1.3rem; height: 1.3rem;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+.step-btn:not(.active) .step-num { background: var(--border); color: var(--muted); }
+
+/* ── Panels ── */
+.panel { display: none; }
+.panel.active { display: block; animation: fadeUp 0.2s ease; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.5rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow);
+}
+.card-title {
+  font-family: 'Libre Baskerville', serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent-bg);
+  padding-bottom: 0.5rem;
+  margin-bottom: 1.1rem;
+}
+
+/* ── Form ── */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.9rem; }
+.form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+input, select {
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 0.92rem;
+  padding: 0.48rem 0.7rem;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+input[type="number"], input[type="time"] {
+  font-family: 'JetBrains Mono', monospace;
+}
+.check-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+.check-row input[type="checkbox"] { width: auto; accent-color: var(--accent); cursor: pointer; }
+.check-row label { text-transform: none; letter-spacing: normal; font-size: 0.88rem; color: var(--text); cursor: pointer; font-weight: 400; }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: var(--accent2); }
+.btn-ghost { background: var(--surface2); color: var(--text); border: 1.5px solid var(--border); }
+.btn-ghost:hover { background: var(--border); }
+.btn-success { background: var(--green); color: white; }
+.btn-success:hover { filter: brightness(1.12); }
+.btn-danger { background: var(--red-bg); color: var(--red); border: 1.5px solid #e0a0a0; }
+.btn-danger:hover { background: #f5d0d0; }
+.btn-lg { padding: 0.7rem 1.5rem; font-size: 0.96rem; }
+.btn-row { display: flex; gap: 0.65rem; flex-wrap: wrap; margin-top: 1rem; }
+
+/* ── Days ── */
+.days-wrap { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.day-chip {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+}
+.day-chip input[type="date"] {
+  border: none; background: none; padding: 0.15rem 0.2rem;
+  font-size: 0.88rem; font-family: 'JetBrains Mono', monospace;
+  width: 155px;
+}
+.day-chip button.del-day {
+  background: none; border: none; cursor: pointer;
+  color: var(--red); font-size: 0.85rem; line-height: 1;
+  padding: 0.1rem;
+}
+.sess-toggle {
+  display: flex; gap: 0.25rem;
+}
+.sess-btn {
+  font-size: 0.72rem; font-weight: 700;
+  padding: 0.18rem 0.45rem;
+  border-radius: 4px;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--muted);
+  transition: all 0.12s;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+}
+.sess-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sess-sep { width: 1px; background: var(--border); align-self: stretch; margin: 0 0.1rem; }
+
+/* ── Dropzone ── */
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2.5rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface2);
+  transition: all 0.2s;
+}
+.dropzone:hover, .dropzone.over {
+  border-color: var(--accent2);
+  background: var(--accent-bg);
+}
+.dropzone .dz-icon { font-size: 2.5rem; margin-bottom: 0.6rem; }
+.dropzone p { color: var(--muted); font-size: 0.88rem; }
+.dropzone strong { color: var(--text); }
+
+/* ── Student list ── */
+.list-header {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr auto;
+  gap: 0.75rem;
+  padding: 0.45rem 0.75rem;
+  background: var(--surface2);
+  border-radius: 6px 6px 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.student-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  transition: background 0.1s;
+}
+.student-row:last-child { border-bottom: none; }
+.student-row:hover { background: var(--surface2); }
+.s-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.student-row select {
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+}
+.del-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 0.9rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+.del-btn:hover { color: var(--red); background: var(--red-bg); }
+
+/* ── Messages ── */
+.msg {
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  font-size: 0.87rem;
+  margin-bottom: 0.9rem;
+}
+.msg-info    { background: var(--accent-bg); color: var(--blue);  border: 1px solid #b8d0e8; }
+.msg-success { background: var(--green-bg);  color: var(--green); border: 1px solid #a0d0b0; }
+.msg-warn    { background: var(--amber-bg);  color: var(--amber); border: 1px solid #e0c060; }
+.msg-error   { background: var(--red-bg);    color: var(--red);   border: 1px solid #e0a0a0; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed; top: 4.5rem; right: 1.25rem;
+  z-index: 999;
+  pointer-events: none;
+}
+.toast-item {
+  padding: 0.65rem 1rem;
+  border-radius: 6px;
+  font-size: 0.87rem;
+  margin-bottom: 0.5rem;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  animation: slideIn 0.2s ease, fadeOut 0.3s ease 2.7s forwards;
+}
+@keyframes slideIn { from { opacity:0; transform: translateX(20px); } to { opacity:1; transform: none; } }
+@keyframes fadeOut { to { opacity:0; transform: translateX(20px); } }
+
+/* ── Stats bar ── */
+.stats-bar {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  background: var(--accent);
+  color: white;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 1rem 1.5rem;
+}
+.stat { display: flex; flex-direction: column; gap: 0.1rem; }
+.stat-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.stat-lbl { font-size: 0.72rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.06em; }
+.badge-type {
+  margin-left: auto;
+  padding: 0.3rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.badge-ccf         { background: #d4edda; color: #155724; }
+.badge-entrainement { background: var(--accent-bg); color: var(--blue); }
+.badge-ponctuelle  { background: #f8d7da; color: #721c24; }
+.badge-blanc       { background: #e2e3e5; color: #383d41; }
+
+/* ── Schedule output ── */
+.sched-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.day-block { border-bottom: 3px solid var(--border); }
+.day-block:last-child { border-bottom: none; }
+.day-hd {
+  background: var(--accent);
+  color: white;
+  padding: 0.6rem 1.25rem;
+  font-family: 'Libre Baskerville', serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.day-hd span:last-child { font-size: 0.78rem; opacity: 0.65; font-family: 'Source Sans 3', sans-serif; font-weight: 400; }
+.session-hd {
+  padding: 0.35rem 1.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.9);
+}
+.session-hd.morning   { background: #2a4f78; }
+.session-hd.afternoon { background: #5a3070; }
+.slot-row {
+  display: grid;
+  grid-template-columns: 125px 1fr 60px;
+  border-bottom: 1px solid var(--border);
+}
+.slot-row:last-child { border-bottom: none; }
+.slot-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.65rem 0.9rem;
+  border-right: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  display: flex; align-items: center;
+}
+.slot-student {
+  padding: 0.65rem 1.1rem;
+  display: flex; align-items: center; gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.slot-name { font-weight: 600; font-size: 0.9rem; }
+.slot-vacant { font-style: italic; color: var(--muted); font-size: 0.87rem; }
+.slot-idx {
+  padding: 0.65rem 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: right;
+  display: flex; align-items: center; justify-content: flex-end;
+  border-left: 1px solid var(--border);
+}
+.ctag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+.ctag-debut    { background: #d4edda; color: #155724; }
+.ctag-fin      { background: var(--blue-bg); color: var(--blue); }
+.ctag-pasp     { background: var(--amber-bg); color: var(--amber); }
+.ctag-premier  { background: #e8d8f8; color: #5a0080; }
+.ctag-dernier  { background: #ffe8cc; color: #7a3500; }
+.ctag-tiers    { background: #fce4d6; color: #7a2800; border: 1px solid #f4b49a; }
+.tiers-dur     { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #7a2800; background: #fff0ea; border: 1px solid #f4b49a; border-radius: 3px; padding: 0.1rem 0.45rem; }
+.tt-row        { background: #fff7f3 !important; border-left: 3px solid #e8805a; }
+.tt-row .slot-time { color: #7a2800 !important; font-weight: 700; }
+.session-hd.tiers  { background: #7a2800; }
+.ctag-tiers    { background: #1d3557; color: #ffffff; }
+.tiers-dur     { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--muted); padding: 0.1rem 0.4rem; background: var(--surface2); border-radius: 3px; border: 1px solid var(--border); }
+.break-row {
+  display: grid;
+  grid-template-columns: 125px 1fr;
+  border-bottom: 1px solid var(--pause-border);
+  background: var(--pause-bg);
+}
+.break-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  padding: 0.45rem 0.9rem;
+  border-right: 1px solid var(--pause-border);
+  color: var(--amber);
+  display: flex; align-items: center;
+}
+.break-label {
+  padding: 0.45rem 1.1rem;
+  font-size: 0.8rem;
+  color: var(--amber);
+  font-weight: 600;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.lunch-row {
+  display: grid;
+  grid-template-columns: 125px 1fr;
+  border-bottom: 1px solid var(--border);
+  background: var(--lunch-bg);
+}
+.lunch-time { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; padding: 0.5rem 0.9rem; border-right: 1px solid var(--border); color: var(--muted); display: flex; align-items: center; }
+.lunch-label { padding: 0.5rem 1.1rem; font-size: 0.82rem; color: var(--muted); font-style: italic; display: flex; align-items: center; gap: 0.4rem; }
+
+/* ── Export section ── */
+.export-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-top: 1.25rem;
+  box-shadow: var(--shadow);
+}
+details summary { cursor: pointer; font-size: 0.85rem; color: var(--accent); font-weight: 600; margin-top: 0.75rem; }
+details p { margin-top: 0.5rem; font-size: 0.84rem; color: var(--muted); line-height: 1.7; }
+
+/* ── No-data ── */
+.no-data { text-align: center; padding: 3rem 2rem; color: var(--muted); }
+.no-data .icon { font-size: 3rem; margin-bottom: 0.75rem; }
+
+/* ── Manual add ── */
+.manual-add {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.manual-add .form-group { flex: 1; min-width: 130px; }
+
+@media (max-width: 600px) {
+  .step-btn .step-lbl { display: none; }
+  header h1 { font-size: 1rem; }
+  .form-grid { grid-template-columns: 1fr 1fr; }
+  .slot-row { grid-template-columns: 100px 1fr; }
+  .slot-idx { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📋 Planificateur d'oraux</h1>
+  <div id="headerMeta">–</div>
+</header>
+
+<main>
+  <!-- Navigation par étapes -->
+  <nav class="steps">
+    <button class="step-btn active" data-step="1" onclick="goStep(1)">
+      <span class="step-num">1</span><span class="step-lbl">Configuration</span>
+    </button>
+    <button class="step-btn" data-step="2" onclick="goStep(2)">
+      <span class="step-num">2</span><span class="step-lbl">Élèves</span>
+    </button>
+    <button class="step-btn" data-step="3" onclick="goStep(3)">
+      <span class="step-num">3</span><span class="step-lbl">Contraintes</span>
+    </button>
+    <button class="step-btn" data-step="4" onclick="goStep(4)">
+      <span class="step-num">4</span><span class="step-lbl">Planning</span>
+    </button>
+  </nav>
+
+  <!-- ═══════════════════════════════ ÉTAPE 1 ═══════════════════════════════ -->
+  <div class="panel active" id="panel-1">
+
+    <div class="card">
+      <div class="card-title">🎓 Épreuve</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="matiere">Matière</label>
+          <input type="text" id="matiere" placeholder="ex : anglais, histoire-géo…">
+        </div>
+        <div class="form-group">
+          <label for="typeOral">Type d'oral</label>
+          <select id="typeOral">
+            <option value="ccf">CCF</option>
+            <option value="entrainement">Entraînement</option>
+            <option value="ponctuelle">Épreuve ponctuelle</option>
+            <option value="blanc">Oral blanc</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⏱ Durées (en minutes)</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="dureeOral">Durée de l'oral</label>
+          <input type="number" id="dureeOral" value="20" min="5" max="180">
+        </div>
+        <div class="form-group">
+          <label for="transition">Temps entre candidats</label>
+          <input type="number" id="transition" value="5" min="0" max="60">
+        </div>
+        <div class="form-group">
+          <label for="pauseMilieu">Pause milieu de demi-journée</label>
+          <input type="number" id="pauseMilieu" value="30" min="0" max="90">
+        </div>
+        <div class="form-group">
+          <label for="pauseMidi">Pause méridienne</label>
+          <input type="number" id="pauseMidi" value="90" min="30" max="240">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🕐 Horaires journaliers</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="heureDebut">Début des oraux</label>
+          <input type="time" id="heureDebut" value="08:00">
+        </div>
+        <div class="form-group">
+          <label for="debutMidi">Début pause méridienne</label>
+          <input type="time" id="debutMidi" value="12:00">
+        </div>
+        <div class="form-group">
+          <label for="heureFin">Fin max des oraux</label>
+          <input type="time" id="heureFin" value="17:30">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📅 Jours de session</div>
+      <p style="font-size:0.82rem;color:var(--muted);margin-bottom:0.75rem;">Pour chaque jour, activer les demi-journées souhaitées (M = matin, AM = après-midi).</p>
+      <div id="daysList" class="days-wrap"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost" onclick="addDay()">+ Ajouter un jour</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary btn-lg" onclick="goStep(2)">Suivant : élèves →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════ ÉTAPE 2 ═══════════════════════════════ -->
+  <div class="panel" id="panel-2">
+
+    <div class="card">
+      <div class="card-title">📥 Importer la liste des élèves</div>
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+        <div class="dz-icon">📊</div>
+        <p><strong>Cliquer pour choisir un fichier</strong> ou glisser-déposer</p>
+        <p style="margin-top:0.4rem;">Formats acceptés : .xlsx, .xls, .csv — exporté depuis Google Sheets ou Excel</p>
+        <p style="margin-top:0.3rem; font-size:0.8rem; color:var(--muted);">Colonne A : nom · Colonne B : prénom (ou nom complet en colonne A)</p>
+      </div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFile(event)">
+
+      <div class="manual-add">
+        <div class="form-group">
+          <label for="mNom">Nom</label>
+          <input type="text" id="mNom" placeholder="DUPONT">
+        </div>
+        <div class="form-group">
+          <label for="mPrenom">Prénom</label>
+          <input type="text" id="mPrenom" placeholder="Jean">
+        </div>
+        <button class="btn btn-ghost" onclick="addManual()">+ Ajouter</button>
+      </div>
+    </div>
+
+    <div class="card" id="listCard" style="display:none;">
+      <div class="card-title" id="listCardTitle">👥 Liste (0 élèves)</div>
+      <div class="list-header">
+        <span>Élève</span><span>Contrainte</span><span></span>
+      </div>
+      <div id="listBody"></div>
+      <div class="btn-row">
+        <button class="btn btn-danger" onclick="clearAll()">🗑 Vider la liste</button>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goStep(1)">← Retour</button>
+      <button class="btn btn-primary btn-lg" onclick="goStep(3)">Suivant : contraintes →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════ ÉTAPE 3 ═══════════════════════════════ -->
+  <div class="panel" id="panel-3">
+    <div class="card">
+      <div class="card-title">⚠️ Contraintes de passage</div>
+      <p style="font-size:0.87rem;color:var(--muted);margin-bottom:1rem;">Par défaut, l'ordre est entièrement aléatoire. Assigner ici des contraintes aux élèves concernés.</p>
+      <div class="list-header">
+        <span>Élève</span><span>Contrainte</span><span></span>
+      </div>
+      <div id="constraintBody">
+        <div class="no-data"><div class="icon">👤</div><p>Aucun élève importé.</p></div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="goStep(2)">← Retour</button>
+      <button class="btn btn-primary btn-lg" onclick="generate()">🎲 Générer le planning →</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════ ÉTAPE 4 ═══════════════════════════════ -->
+  <div class="panel" id="panel-4">
+    <div id="schedOutput">
+      <div class="no-data"><div class="icon">📅</div><p>Aucun planning généré.</p></div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════
+let students = []; // {nom, prenom, constraint: null|'debut'|'fin'|'pasp'}
+let days     = []; // {id, date}
+let schedule = []; // computed slots
+
+// ══════════════════════════════════════════════════════
+//  NAVIGATION
+// ══════════════════════════════════════════════════════
+function goStep(n) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.step-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + n).classList.add('active');
+  document.querySelector('[data-step="' + n + '"]').classList.add('active');
+  if (n === 2) renderStudentList();
+  if (n === 3) renderConstraints();
+  if (n === 4) renderSchedule();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ══════════════════════════════════════════════════════
+//  DAYS
+// ══════════════════════════════════════════════════════
+function addDay(val) {
+  const id = 'day' + Date.now() + Math.random();
+  days.push({ id, date: val || '', morning: true, afternoon: true });
+  renderDays();
+}
+function removeDay(id) {
+  days = days.filter(d => d.id !== id);
+  renderDays();
+}
+function toggleSess(id, sess) {
+  const d = days.find(x => x.id === id);
+  if (!d) return;
+  // Empêcher de désactiver les deux
+  const other = sess === 'morning' ? 'afternoon' : 'morning';
+  if (d[sess] && !d[other]) return; // ne pas désactiver si c'est le dernier actif
+  d[sess] = !d[sess];
+  renderDays();
+}
+function renderDays() {
+  const el = document.getElementById('daysList');
+  el.innerHTML = '';
+  days.forEach(d => {
+    const chip = document.createElement('div');
+    chip.className = 'day-chip';
+    chip.innerHTML = `
+      <input type="date" value="${d.date}" onchange="updateDay('${d.id}',this.value)">
+      <div class="sess-sep"></div>
+      <div class="sess-toggle">
+        <button class="sess-btn${d.morning ? ' on' : ''}" onclick="toggleSess('${d.id}','morning')" title="Matin">M</button>
+        <button class="sess-btn${d.afternoon ? ' on' : ''}" onclick="toggleSess('${d.id}','afternoon')" title="Après-midi">AM</button>
+      </div>
+      <button class="del-day" onclick="removeDay('${d.id}')" title="Supprimer">✕</button>
+    `;
+    el.appendChild(chip);
+  });
+}
+function updateDay(id, v) { const d = days.find(x => x.id === id); if (d) d.date = v; }
+
+// Init default days
+addDay(); addDay();
+
+// ══════════════════════════════════════════════════════
+//  FILE IMPORT
+// ══════════════════════════════════════════════════════
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
+
+function handleFile(ev) { if (ev.target.files[0]) processFile(ev.target.files[0]); ev.target.value=''; }
+
+function processFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+      let start = 0;
+      const hdr = (rows[0] || []).map(c => String(c||'').toLowerCase());
+      if (hdr.some(c => /nom|pr.nom|name|l.ve/.test(c))) start = 1;
+
+      let added = 0;
+      for (let i = start; i < rows.length; i++) {
+        const row = rows[i];
+        const a = String(row[0]||'').trim();
+        const b = String(row[1]||'').trim();
+        if (!a) continue;
+        if (b) {
+          students.push({ nom: a.toUpperCase(), prenom: b, constraint: null });
+        } else {
+          const parts = a.split(/\s+/);
+          students.push({ nom: parts[0].toUpperCase(), prenom: parts.slice(1).join(' '), constraint: null });
+        }
+        added++;
+      }
+      renderStudentList();
+      toast(`${added} élève(s) importé(s).`, 'success');
+    } catch(err) { toast('Erreur lecture fichier : ' + err.message, 'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function addManual() {
+  const nom = document.getElementById('mNom').value.trim();
+  const prenom = document.getElementById('mPrenom').value.trim();
+  if (!nom) { toast('Le nom est requis.', 'warn'); return; }
+  students.push({ nom: nom.toUpperCase(), prenom, constraint: null });
+  document.getElementById('mNom').value = '';
+  document.getElementById('mPrenom').value = '';
+  renderStudentList();
+}
+
+function removeStudent(i) { students.splice(i, 1); renderStudentList(); }
+function clearAll() { if (confirm('Vider la liste des élèves ?')) { students = []; renderStudentList(); } }
+
+function renderStudentList() {
+  const n = students.length;
+  const card = document.getElementById('listCard');
+  const body = document.getElementById('listBody');
+  document.getElementById('listCardTitle').textContent = `👥 Liste (${n} élève${n>1?'s':''})`;
+  card.style.display = n ? 'block' : 'none';
+  body.innerHTML = students.map((s, i) => `
+    <div class="student-row">
+      <span class="s-name">${s.nom}${s.prenom ? ' '+s.prenom : ''}</span>
+      <span class="ctag ${ctagClass(s.constraint)}">${ctagLabel(s.constraint)}</span>
+      <button class="del-btn" onclick="removeStudent(${i})" title="Supprimer">✕</button>
+    </div>
+  `).join('');
+  updateHeader();
+}
+
+// ══════════════════════════════════════════════════════
+//  CONSTRAINTS
+// ══════════════════════════════════════════════════════
+function renderConstraints() {
+  const el = document.getElementById('constraintBody');
+  if (!students.length) {
+    el.innerHTML = '<div class="no-data"><div class="icon">👤</div><p>Aucun élève importé.</p></div>';
+    return;
+  }
+  el.innerHTML = students.map((s, i) => `
+    <div class="student-row">
+      <span class="s-name">${s.nom}${s.prenom ? ' '+s.prenom : ''}</span>
+      <select onchange="setConstraint(${i},this.value)">
+        <option value=""        ${!s.constraint              ? 'selected':''}>Aléatoire</option>
+        <option value="tiers"   ${s.constraint==='tiers'     ? 'selected':''}>Tiers-temps (passe en dernier, +1/3 de la durée)</option>
+        <option value="premier" ${s.constraint==='premier'   ? 'selected':''}>Doit passer en premier (absolu)</option>
+        <option value="dernier" ${s.constraint==='dernier'   ? 'selected':''}>Doit passer en dernier (absolu)</option>
+        <option value="debut"   ${s.constraint==='debut'     ? 'selected':''}>Début de journée</option>
+        <option value="fin"     ${s.constraint==='fin'       ? 'selected':''}>Fin de journée</option>
+        <option value="pasp"    ${s.constraint==='pasp'      ? 'selected':''}>Ne pas passer en premier</option>
+      </select>
+      <span></span>
+    </div>
+  `).join('');
+}
+function setConstraint(i, v) { students[i].constraint = v || null; }
+function ctagLabel(c) { return c==='debut'?'Début':c==='fin'?'Fin':c==='pasp'?'Pas 1ᵉʳ':c==='premier'?'1ᵉʳ absolu':c==='dernier'?'Dernier absolu':c==='tiers'?'Tiers-temps':'–'; }
+function ctagClass(c) { return c==='debut'?'ctag-debut':c==='fin'?'ctag-fin':c==='pasp'?'ctag-pasp':c==='premier'?'ctag-premier':c==='dernier'?'ctag-dernier':c==='tiers'?'ctag-tiers':''; }
+
+// ══════════════════════════════════════════════════════
+//  SCHEDULING
+// ══════════════════════════════════════════════════════
+function toMin(t) { const [h,m]=t.split(':').map(Number); return h*60+m; }
+function toHM(n) { return String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0'); }
+function shuffle(a) {
+  const b=[...a];
+  for(let i=b.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [b[i],b[j]]=[b[j],b[i]]; }
+  return b;
+}
+
+// ── Génère exactement `n` créneaux de durée `oralDur` dans les fenêtres dispo ──
+// daySessions : { 'YYYY-MM-DD': ['morning'], 'YYYY-MM-DD': ['morning','afternoon'], … }
+// afterSlot   : {date, sess, e} — si fourni, démarre juste après ce créneau
+// isTiers     : les créneaux générés sont marqués tiersTems:true
+function buildNSlots(validDays, daySessions, cfg, n, oralDur, afterSlot, isTiers) {
+  if (n <= 0) return [];
+  const { start, midiStart, midiDur, end, trans, brk } = cfg;
+  const midiEnd  = midiStart + midiDur;
+  const interval = oralDur + trans;
+  const sessWindow = { morning: { ws: start, we: midiStart }, afternoon: { ws: midiEnd, we: end } };
+  const allSessOrder = ['morning', 'afternoon'];
+
+  // Position de départ
+  let diStart = 0;
+  let sessStart = 'morning';
+  let tStart = start;
+
+  if (afterSlot) {
+    diStart = validDays.indexOf(afterSlot.date);
+    if (diStart < 0) diStart = 0;
+    sessStart = afterSlot.sess;
+    tStart    = afterSlot.e + trans;
+
+    // Si débordement de la fenêtre courante → trouver la session suivante disponible
+    const we = sessWindow[sessStart].we;
+    if (tStart + oralDur > we) {
+      // Chercher la session suivante sur ce jour ou le jour suivant
+      let found = false;
+      for (let di2 = diStart; di2 < validDays.length && !found; di2++) {
+        const date2   = validDays[di2];
+        const avail2  = daySessions[date2] || [];
+        const startSi = (di2 === diStart)
+          ? allSessOrder.indexOf(sessStart) + 1
+          : 0;
+        for (let si = startSi; si < allSessOrder.length && !found; si++) {
+          const s2 = allSessOrder[si];
+          if (!avail2.includes(s2)) continue;
+          diStart   = di2;
+          sessStart = s2;
+          tStart    = sessWindow[s2].ws;
+          found     = true;
+        }
+      }
+    }
+  }
+
+  const slots     = [];
+  let remaining   = n;
+
+  for (let di = diStart; di < validDays.length && remaining > 0; di++) {
+    const date  = validDays[di];
+    const avail = daySessions[date] || [];
+
+    // Déterminer l'indice de session de départ pour ce jour
+    const si0 = (di === diStart)
+      ? allSessOrder.indexOf(sessStart)
+      : 0;
+
+    for (let si = si0; si < allSessOrder.length && remaining > 0; si++) {
+      const sess        = allSessOrder[si];
+      if (!avail.includes(sess)) continue;
+
+      const { ws, we }  = sessWindow[sess];
+      const t0          = (di === diStart && sess === sessStart) ? tStart : ws;
+      if (t0 + oralDur > we) continue;
+
+      const maxFit  = Math.floor((we - t0 - oralDur) / interval) + 1;
+      const toPlace = Math.min(maxFit, remaining);
+
+      // Pause au milieu de la session (uniquement si non-tiers, brk > 0)
+      const brkIdx = (!isTiers && brk > 0 && toPlace > 1) ? Math.ceil(toPlace / 2) - 1 : -1;
+
+      let ct = t0;
+      for (let i = 0; i < toPlace; i++) {
+        slots.push({
+          date, sess,
+          s: ct, e: ct + oralDur,
+          oral: oralDur,
+          brk:      i === brkIdx ? brk : 0,
+          brkAfter: i === brkIdx,
+          midiStart, midiEnd,
+          ...(isTiers ? { tiersTems: true } : {})
+        });
+        ct += interval;
+        if (i === brkIdx) ct += brk;
+        remaining--;
+      }
+    }
+  }
+
+  return slots;
+}
+
+function generate() {
+  const validDays = days.filter(d => d.date).map(d => d.date).sort();
+  if (!validDays.length) { toast('Ajoutez au moins une date de session.', 'warn'); goStep(1); return; }
+  if (!students.length)  { toast('Importez la liste des élèves.', 'warn'); goStep(2); return; }
+
+  const oral      = parseInt(document.getElementById('dureeOral').value)  || 20;
+  const trans     = parseInt(document.getElementById('transition').value)  || 0;
+  const brk       = parseInt(document.getElementById('pauseMilieu').value) || 0;
+  const midiDur   = parseInt(document.getElementById('pauseMidi').value)   || 90;
+  const start     = toMin(document.getElementById('heureDebut').value);
+  const midiStart = toMin(document.getElementById('debutMidi').value);
+  const end       = toMin(document.getElementById('heureFin').value);
+
+  const cfg       = { start, midiStart, midiDur, end, oral, trans, brk };
+  const oralTiers = Math.ceil(oral * 4 / 3);
+
+  // Carte des sessions disponibles par jour
+  const daySessions = {};
+  validDays.forEach(date => {
+    const d = days.find(x => x.date === date);
+    daySessions[date] = [];
+    if (d && d.morning)   daySessions[date].push('morning');
+    if (d && d.afternoon) daySessions[date].push('afternoon');
+    if (!daySessions[date].length) daySessions[date] = ['morning', 'afternoon']; // sécurité
+  });
+
+  // ── 1. Séparation des élèves ───────────────────────
+  const tiersStu   = shuffle(students.filter(s => s.constraint === 'tiers'));
+  const regularStu = students.filter(s => s.constraint !== 'tiers');
+
+  // ── 2. Créneaux : exactement autant de slots que d'élèves ─
+  const rawSlots = buildNSlots(validDays, daySessions, cfg, regularStu.length, oral, null, false);
+
+  if (!rawSlots.length && !tiersStu.length) {
+    toast('Aucun créneau disponible. Vérifiez les horaires et durées.', 'error');
+    return;
+  }
+  if (rawSlots.length < regularStu.length) {
+    toast(`Attention : seulement ${rawSlots.length} créneau(x) disponibles pour ${regularStu.length} élèves réguliers. Ajoutez des jours.`, 'warn');
+  }
+
+  // ── 3. Créneaux tiers-temps juste après le dernier créneau régulier ──
+  const afterRegular = rawSlots.length > 0 ? rawSlots[rawSlots.length - 1] : null;
+  const tiersSlots   = buildNSlots(validDays, daySessions, cfg, tiersStu.length, oralTiers, afterRegular, true);
+
+  if (tiersSlots.length < tiersStu.length) {
+    toast(`Attention : seulement ${tiersSlots.length} créneau(x) tiers-temps disponibles pour ${tiersStu.length} élèves. Ajoutez des jours.`, 'warn');
+  }
+
+  // ── 4. Affectation des élèves réguliers avec contraintes ──
+  const dateSet = [...new Set(rawSlots.map(s => s.date))];
+  const firstIdx = dateSet.map(date => rawSlots.findIndex(s => s.date === date));
+  const lastIdx  = dateSet.map(date => { for (let i = rawSlots.length-1; i >= 0; i--) if (rawSlots[i].date === date) return i; return -1; });
+
+  const premierStu = shuffle(regularStu.filter(s => s.constraint === 'premier'));
+  const dernierStu = shuffle(regularStu.filter(s => s.constraint === 'dernier'));
+  const debutStu   = shuffle(regularStu.filter(s => s.constraint === 'debut'));
+  const finStu     = shuffle(regularStu.filter(s => s.constraint === 'fin'));
+  const paspStu    = shuffle(regularStu.filter(s => s.constraint === 'pasp'));
+  const freeStu    = shuffle(regularStu.filter(s => !s.constraint));
+
+  const assign  = new Array(rawSlots.length).fill(null);
+  const overflow = [];
+
+  premierStu.forEach((stu, i) => {
+    if (i < rawSlots.length && assign[i] === null) assign[i] = stu;
+    else overflow.push(stu);
+  });
+
+  dernierStu.forEach((stu, i) => {
+    const idx = rawSlots.length - 1 - i;
+    if (idx >= 0 && assign[idx] === null) assign[idx] = stu;
+    else overflow.push(stu);
+  });
+
+  let debutUsed = 0;
+  for (let di = 0; di < dateSet.length && debutUsed < debutStu.length; di++) {
+    if (assign[firstIdx[di]] === null) assign[firstIdx[di]] = debutStu[debutUsed++];
+  }
+  while (debutUsed < debutStu.length) overflow.push(debutStu[debutUsed++]);
+
+  let finUsed = 0;
+  for (let di = 0; di < dateSet.length && finUsed < finStu.length; di++) {
+    let idx = lastIdx[di];
+    while (idx >= 0 && assign[idx] !== null) idx--;
+    if (idx >= 0) assign[idx] = finStu[finUsed++]; else overflow.push(finStu[finUsed++]);
+  }
+  while (finUsed < finStu.length) overflow.push(finStu[finUsed++]);
+
+  const mainQueue = [...freeStu, ...overflow];
+  paspStu.forEach(stu => {
+    const pos = mainQueue.length > 0 ? 1 + Math.floor(Math.random() * Math.max(1, mainQueue.length-1)) : 0;
+    mainQueue.splice(pos, 0, stu);
+  });
+  const firstFree = assign.findIndex(v => v === null);
+  if (firstFree >= 0 && mainQueue.length > 0 && mainQueue[0].constraint === 'pasp') {
+    const fi = mainQueue.findIndex(s => s.constraint !== 'pasp');
+    if (fi > 0) [mainQueue[0], mainQueue[fi]] = [mainQueue[fi], mainQueue[0]];
+  }
+
+  let qi = 0;
+  for (let i = 0; i < assign.length; i++) {
+    if (assign[i] === null && qi < mainQueue.length) assign[i] = mainQueue[qi++];
+  }
+
+  // ── 5. Assemblage final ───────────────────────────
+  schedule = [
+    ...rawSlots.map((sl, i) => ({ ...sl, student: assign[i] || null })),
+    ...tiersSlots.map((sl, i) => ({ ...sl, student: tiersStu[i] || null }))
+  ];
+
+  goStep(4);
+}
+
+// ══════════════════════════════════════════════════════
+//  RENDER SCHEDULE
+// ══════════════════════════════════════════════════════
+function renderSchedule() {
+  const el = document.getElementById('schedOutput');
+  if (!schedule.length) {
+    el.innerHTML = '<div class="no-data"><div class="icon">📅</div><p>Aucun planning généré.</p></div>';
+    return;
+  }
+
+  const mat = document.getElementById('matiere').value || '–';
+  const typ = document.getElementById('typeOral').value;
+  const typLabels = { ccf:'CCF', entrainement:'Entraînement', ponctuelle:'Épreuve ponctuelle', blanc:'Oral blanc' };
+
+  const assigned  = schedule.filter(s => s.student).length;
+  const total     = students.length;
+  const nTiers    = schedule.filter(s => s.tiersTems).length;
+
+  // Stats + warnings
+  let html = `
+    <div class="btn-row" style="margin-bottom:1rem;">
+      <button class="btn btn-ghost" onclick="goStep(3)">← Modifier</button>
+      <button class="btn btn-ghost" onclick="generate()">🎲 Regénérer l'ordre</button>
+    </div>
+  `;
+
+  if (total > assigned) html += `<div class="msg msg-warn">⚠ ${total - assigned} élève(s) non planifié(s) : créneaux insuffisants. Ajoutez des jours ou rallongez les horaires.</div>`;
+
+  html += `<div class="sched-wrap">`;
+
+  // Stats bar (inside the wrap, as header)
+  html += `
+    <div class="stats-bar">
+      <div class="stat"><span class="stat-val">${total}</span><span class="stat-lbl">élèves</span></div>
+      <div class="stat"><span class="stat-val">${assigned}</span><span class="stat-lbl">planifiés</span></div>
+      ${nTiers ? `<div class="stat"><span class="stat-val" style="color:#ffffff;">${nTiers}</span><span class="stat-lbl">tiers-temps</span></div>` : ''}
+      <div class="stat"><span class="stat-val" style="font-size:1.1rem;">${mat}</span><span class="stat-lbl">matière</span></div>
+      <span class="badge-type badge-${typ}">${typLabels[typ]}</span>
+    </div>
+  `;
+
+  // Group by date
+  const dates = [...new Set(schedule.map(s => s.date))];
+  dates.forEach(date => {
+    const daySlots = schedule.filter(s => s.date === date);
+    const dateLabel = new Date(date + 'T12:00:00').toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+    const cap = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+    const n = daySlots.filter(s => s.student).length;
+
+    html += `<div class="day-block">`;
+    html += `<div class="day-hd"><span>${cap}</span><span>${n} candidat${n>1?'s':''}</span></div>`;
+
+    let prevSess = null;
+    let prevIsTT = null;
+    let rankInSess = 0;
+
+    daySlots.forEach((sl) => {
+      const isTT = !!sl.tiersTems;
+
+      // Changement de session (matin → après-midi)
+      if (sl.sess !== prevSess) {
+        if (prevSess === 'morning' && sl.sess === 'afternoon') {
+          html += `
+            <div class="lunch-row">
+              <div class="lunch-time">${toHM(sl.midiStart)} – ${toHM(sl.midiEnd)}</div>
+              <div class="lunch-label">🍽 Pause méridienne</div>
+            </div>
+          `;
+        }
+        prevSess = sl.sess;
+        prevIsTT = null;
+        rankInSess = 0;
+        if (!isTT) {
+          const sesLabel = sl.sess === 'morning' ? '🌅 Matin' : '🌆 Après-midi';
+          html += `<div class="session-hd ${sl.sess}">${sesLabel}</div>`;
+        }
+      }
+
+      // Séparateur avant le premier créneau tiers-temps
+      if (isTT && !prevIsTT) {
+        const oralNorm = parseInt(document.getElementById('dureeOral').value) || 20;
+        const oralTT   = Math.ceil(oralNorm * 4 / 3);
+        html += `<div class="session-hd tiers">⏳ Tiers-temps — durée : ${oralTT} min</div>`;
+        rankInSess = 0;
+      }
+      prevIsTT = isTT;
+      rankInSess++;
+
+      const ctagsNorm = (!isTT && sl.student && sl.student.constraint)
+        ? `<span class="ctag ${ctagClass(sl.student.constraint)}">${ctagLabel(sl.student.constraint)}</span>`
+        : '';
+
+      html += `
+        <div class="slot-row${isTT ? ' tt-row' : ''}">
+          <div class="slot-time">${toHM(sl.s)} – ${toHM(sl.e)}</div>
+          <div class="slot-student">
+            ${sl.student
+              ? `<span class="slot-name">${sl.student.nom}${sl.student.prenom ? ' ' + sl.student.prenom : ''}</span>
+                 ${isTT
+                   ? `<span class="ctag ctag-tiers">Tiers-temps</span><span class="tiers-dur">${sl.oral} min</span>`
+                   : ctagsNorm}`
+              : `<span class="slot-vacant">— créneau vacant —</span>`
+            }
+          </div>
+          <div class="slot-idx">#${rankInSess}</div>
+        </div>
+      `;
+
+      if (sl.brkAfter && sl.brk) {
+        html += `
+          <div class="break-row">
+            <div class="break-time">${toHM(sl.e)} – ${toHM(sl.e + sl.brk)}</div>
+            <div class="break-label">⏸ Pause — ${sl.brk} min</div>
+          </div>
+        `;
+      }
+    });
+
+    html += `</div>`;
+  });
+
+  html += `</div>`; // .sched-wrap
+
+  // Export section
+  html += `
+    <div class="export-card">
+      <div style="font-family:'Libre Baskerville',serif;font-size:0.95rem;font-weight:700;color:var(--accent);margin-bottom:0.9rem;">📤 Export</div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="exportCSV()">⬇ Télécharger CSV</button>
+        <button class="btn btn-ghost" onclick="copyTSV()">📋 Copier pour Google Sheets</button>
+      </div>
+      <div id="exportMsg" style="margin-top:0.75rem;"></div>
+      <details style="margin-top:1rem;">
+        <summary>Comment importer dans Google Sheets ?</summary>
+        <p><strong>Option 1 – CSV :</strong> télécharger le CSV, puis dans Sheets : <em>Fichier → Importer → Importer le fichier → Remplacer la feuille de calcul.</em></p>
+        <p style="margin-top:0.4rem;"><strong>Option 2 – Copier-coller :</strong> cliquer « Copier pour Google Sheets », ouvrir une feuille vierge, cliquer sur la cellule A1, puis coller (Ctrl+V ou Cmd+V).</p>
+      </details>
+    </div>
+  `;
+
+  el.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════
+//  EXPORT
+// ══════════════════════════════════════════════════════
+function buildRows() {
+  const mat = document.getElementById('matiere').value || '';
+  const typ = document.getElementById('typeOral').value;
+  const typLabels = { ccf:'CCF', entrainement:'Entraînement', ponctuelle:'Épreuve ponctuelle', blanc:'Oral blanc' };
+
+  const rows = [
+    ['Matière', mat, 'Type', typLabels[typ]],
+    [],
+    ['Date', 'Session', 'Heure début', 'Heure fin', 'Durée (min)', 'Nom', 'Prénom', 'Rang', 'Contrainte']
+  ];
+
+  const dates = [...new Set(schedule.map(s => s.date))];
+  dates.forEach(date => {
+    const daySlots = schedule.filter(s => s.date === date);
+    const dateLabel = new Date(date+'T12:00:00').toLocaleDateString('fr-FR');
+    let prevSess = null;
+    let rank = 0;
+
+    daySlots.forEach(sl => {
+      if (sl.sess !== prevSess) {
+        if (prevSess === 'morning' && sl.sess === 'afternoon') {
+          rows.push([dateLabel,'Pause méridienne', toHM(sl.midiStart), toHM(sl.midiEnd), '', '','','','']);
+        }
+        prevSess = sl.sess;
+        rank = 0;
+      }
+      rank++;
+      const contrainte = sl.tiersTems ? 'Tiers-temps' : (sl.student && sl.student.constraint ? ctagLabel(sl.student.constraint) : '');
+      rows.push([
+        dateLabel,
+        sl.sess === 'morning' ? 'Matin' : 'Après-midi',
+        toHM(sl.s), toHM(sl.e),
+        sl.oral || '',
+        sl.student ? sl.student.nom : '',
+        sl.student ? sl.student.prenom : '',
+        sl.student ? rank : '',
+        contrainte
+      ]);
+      if (sl.brkAfter && sl.brk) {
+        rows.push([dateLabel, sl.sess==='morning'?'Matin':'Après-midi', toHM(sl.e), toHM(sl.e+sl.brk), '', '⏸ PAUSE','','','']);
+      }
+    });
+    rows.push([]);
+  });
+  return rows;
+}
+
+function exportCSV() {
+  const rows = buildRows();
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `planning_oraux_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function copyTSV() {
+  const rows = buildRows();
+  const tsv = rows.map(r => r.join('\t')).join('\n');
+  const msgEl = document.getElementById('exportMsg');
+  navigator.clipboard.writeText(tsv).then(() => {
+    msgEl.innerHTML = '<div class="msg msg-success">✓ Copié dans le presse-papier — collez dans Google Sheets avec Ctrl+V.</div>';
+    setTimeout(()=>{ msgEl.innerHTML=''; }, 4000);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = tsv; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    msgEl.innerHTML = '<div class="msg msg-success">✓ Copié.</div>';
+    setTimeout(()=>{ msgEl.innerHTML=''; }, 3000);
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  UTILITIES
+// ══════════════════════════════════════════════════════
+function updateHeader() {
+  const mat = document.getElementById('matiere').value;
+  const n   = students.length;
+  document.getElementById('headerMeta').innerHTML =
+    `${mat||'Sans matière'}<br>${n} élève${n!==1?'s':''}`;
+}
+
+function toast(msg, type='info') {
+  const el = document.createElement('div');
+  el.className = 'toast-item msg msg-'+type;
+  el.textContent = msg;
+  document.getElementById('toast').appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+document.getElementById('matiere').addEventListener('input', updateHeader);
+document.getElementById('mNom').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('mPrenom').focus(); });
+document.getElementById('mPrenom').addEventListener('keydown', e => { if (e.key==='Enter') addManual(); });
+</script>
+</body>
+</html>
