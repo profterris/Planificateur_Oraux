@@ -227,13 +227,13 @@ input[type="number"], input[type="time"] {
   border-radius: 4px;
   border: 1.5px solid var(--border);
   cursor: pointer;
-  background: var(--surface);
+  background: #ffffff;
   color: var(--muted);
   transition: all 0.12s;
   letter-spacing: 0.03em;
   line-height: 1.4;
 }
-.sess-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.sess-btn.on { background: var(--green); color: #fff; border-color: var(--green); }
 .sess-sep { width: 1px; background: var(--border); align-self: stretch; margin: 0 0.1rem; }
 
 /* ── Dropzone ── */
@@ -707,7 +707,7 @@ function goStep(n) {
 // ══════════════════════════════════════════════════════
 function addDay(val) {
   const id = 'day' + Date.now() + Math.random();
-  days.push({ id, date: val || '', morning: true, afternoon: true });
+  days.push({ id, date: val || '', morning: false, afternoon: false });
   renderDays();
 }
 function removeDay(id) {
@@ -919,7 +919,12 @@ function buildNSlots(validDays, daySessions, cfg, n, oralDur, afterSlot, isTiers
       const t0          = (di === diStart && sess === sessStart) ? tStart : ws;
       if (t0 + oralDur > we) continue;
 
-      const maxFit  = Math.floor((we - t0 - oralDur) / interval) + 1;
+      // maxFit sans pause
+      const maxFitRaw = Math.floor((we - t0 - oralDur) / interval) + 1;
+      // Si une pause sera insérée au milieu, elle consomme `brk` minutes supplémentaires
+      const maxFit = (!isTiers && brk > 0 && maxFitRaw > 1)
+        ? Math.max(1, Math.floor((we - t0 - oralDur - brk) / interval) + 1)
+        : maxFitRaw;
       const toPlace = Math.min(maxFit, remaining);
 
       // Pause au milieu de la session (uniquement si non-tiers, brk > 0)
