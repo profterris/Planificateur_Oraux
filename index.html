@@ -717,9 +717,6 @@ function removeDay(id) {
 function toggleSess(id, sess) {
   const d = days.find(x => x.id === id);
   if (!d) return;
-  // Empêcher de désactiver les deux
-  const other = sess === 'morning' ? 'afternoon' : 'morning';
-  if (d[sess] && !d[other]) return; // ne pas désactiver si c'est le dernier actif
   d[sess] = !d[sess];
   renderDays();
 }
@@ -733,8 +730,8 @@ function renderDays() {
       <input type="date" value="${d.date}" onchange="updateDay('${d.id}',this.value)">
       <div class="sess-sep"></div>
       <div class="sess-toggle">
-        <button class="sess-btn${d.morning ? ' on' : ''}" onclick="toggleSess('${d.id}','morning')" title="Matin">M</button>
-        <button class="sess-btn${d.afternoon ? ' on' : ''}" onclick="toggleSess('${d.id}','afternoon')" title="Après-midi">AM</button>
+        <button class="sess-btn${d.morning ? ' on' : ''}" onclick="toggleSess('${d.id}','morning')" title="Matin">AM</button>
+        <button class="sess-btn${d.afternoon ? ' on' : ''}" onclick="toggleSess('${d.id}','afternoon')" title="Après-midi">PM</button>
       </div>
       <button class="del-day" onclick="removeDay('${d.id}')" title="Supprimer">✕</button>
     `;
