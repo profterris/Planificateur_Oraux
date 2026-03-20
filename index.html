@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Planificateur d'oraux</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;700&family=Source+Sans+3:ital,wght@0,300;0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -396,6 +397,17 @@ input[type="number"], input[type="time"] {
   border-bottom: 1px solid var(--border);
 }
 .slot-row:last-child { border-bottom: none; }
+.slot-row[draggable="true"] { cursor: grab; }
+.slot-row[draggable="true"]:active { cursor: grabbing; }
+.slot-row.drag-over { outline: 2px dashed var(--accent2); outline-offset: -2px; background: var(--accent-bg); }
+.slot-row.dragging  { opacity: 0.4; }
+.drag-handle {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.5rem; color: var(--border); font-size: 0.9rem;
+  cursor: grab; flex-shrink: 0;
+  transition: color 0.15s;
+}
+.slot-row:hover .drag-handle { color: var(--muted); }
 .slot-time {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.8rem;
@@ -617,10 +629,10 @@ details p { margin-top: 0.5rem; font-size: 0.84rem; color: var(--muted); line-he
       <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
         <div class="dz-icon">📊</div>
         <p><strong>Cliquer pour choisir un fichier</strong> ou glisser-déposer</p>
-        <p style="margin-top:0.4rem;">Formats acceptés : .xlsx, .xls, .csv — exporté depuis Google Sheets ou Excel</p>
-        <p style="margin-top:0.3rem; font-size:0.8rem; color:var(--muted);">Colonne A : nom · Colonne B : prénom (ou nom complet en colonne A)</p>
+        <p style="margin-top:0.4rem;">Formats acceptés : .xlsx, .xls, .csv, .pdf</p>
+        <p style="margin-top:0.3rem; font-size:0.8rem; color:var(--muted);">Colonne A : nom · Colonne B : prénom (ou nom complet en colonne A) — pour PDF : une ligne par élève</p>
       </div>
-      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFile(event)">
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.pdf" style="display:none" onchange="handleFile(event)">
 
       <div class="manual-add">
         <div class="form-group">
@@ -753,7 +765,16 @@ dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over
 
 function handleFile(ev) { if (ev.target.files[0]) processFile(ev.target.files[0]); ev.target.value=''; }
 
+// Configure PDF.js worker
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
 function processFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'pdf') { processPDF(file); return; }
+  // xlsx / xls / csv
   const reader = new FileReader();
   reader.onload = ev => {
     try {
@@ -782,6 +803,105 @@ function processFile(file) {
     } catch(err) { toast('Erreur lecture fichier : ' + err.message, 'error'); }
   };
   reader.readAsArrayBuffer(file);
+}
+
+async function processPDF(file) {
+  try {
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+    let fullText = '';
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const tc   = await page.getTextContent();
+      // Reconstituer les lignes en regroupant par position Y (arrondie)
+      const byY = {};
+      tc.items.forEach(item => {
+        const y = Math.round(item.transform[5]);
+        if (!byY[y]) byY[y] = [];
+        byY[y].push(item.str);
+      });
+      Object.keys(byY).sort((a,b) => b-a).forEach(y => {
+        fullText += byY[y].join(' ').trim() + '\n';
+      });
+    }
+    parsePDFText(fullText);
+  } catch(err) { toast('Erreur lecture PDF : ' + err.message, 'error'); }
+}
+
+function parsePDFText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+
+  // Heuristiques de détection de noms :
+  // 1. Ligne entièrement en majuscules (NOM) suivie d'une ligne mixte (prénom)
+  // 2. Ligne "NOM Prénom" (premier mot tout-caps, reste mixte)
+  // 3. Ligne "Prénom NOM" (dernier mot tout-caps)
+  // On ignore les lignes qui ressemblent à des en-têtes/dates/chiffres seuls
+
+  const isAllCaps  = s => /^[A-ZÀÂÇÉÈÊËÎÏÔÙÛÜ\-\s']+$/.test(s) && s.length > 1;
+  const hasLetters = s => /[a-zA-ZÀ-ÿ]/.test(s);
+  const isNoise    = s => /^\d+$/.test(s) || s.length < 2 || /^(nom|prénom|classe|liste|élève|date|page|\d)/i.test(s);
+
+  const added = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isNoise(line) || !hasLetters(line)) continue;
+
+    const words = line.split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+
+    // Cas 1 : ligne = "MOT_CAPS prénom" ou "MOT_CAPS MOT_CAPS prénom…"
+    // Trouver la frontière entre la partie caps et la partie mixte
+    let capsEnd = 0;
+    for (let w = 0; w < words.length; w++) {
+      if (isAllCaps(words[w])) capsEnd = w + 1; else break;
+    }
+
+    if (capsEnd > 0 && capsEnd < words.length) {
+      const nom    = words.slice(0, capsEnd).join(' ');
+      const prenom = words.slice(capsEnd).join(' ');
+      added.push({ nom, prenom, constraint: null });
+      continue;
+    }
+
+    // Cas 2 : ligne entière en caps = juste le nom (prénom sur la ligne suivante ?)
+    if (isAllCaps(line) && words.length >= 1 && words.length <= 3) {
+      const next = lines[i+1];
+      if (next && !isNoise(next) && !isAllCaps(next) && hasLetters(next)) {
+        added.push({ nom: line, prenom: next, constraint: null });
+        i++; continue;
+      }
+      // Pas de prénom détectable — on stocke comme nom seul
+      added.push({ nom: line, prenom: '', constraint: null });
+      continue;
+    }
+
+    // Cas 3 : dernier(s) mot(s) tout-caps = nom de famille
+    let capsStart = words.length;
+    for (let w = words.length - 1; w >= 0; w--) {
+      if (isAllCaps(words[w])) capsStart = w; else break;
+    }
+    if (capsStart < words.length && capsStart > 0) {
+      const prenom = words.slice(0, capsStart).join(' ');
+      const nom    = words.slice(capsStart).join(' ');
+      added.push({ nom, prenom, constraint: null });
+      continue;
+    }
+
+    // Fallback : ligne à plusieurs mots sans distinction caps → premier mot = nom
+    if (words.length >= 2) {
+      added.push({ nom: words[0].toUpperCase(), prenom: words.slice(1).join(' '), constraint: null });
+    }
+  }
+
+  if (!added.length) {
+    toast('Aucun nom détecté dans le PDF. Vérifiez le format ou utilisez la saisie manuelle.', 'warn');
+    return;
+  }
+
+  students.push(...added);
+  renderStudentList();
+  toast(`${added.length} élève(s) importé(s) depuis le PDF.`, 'success');
 }
 
 function addManual() {
@@ -826,21 +946,22 @@ function renderConstraints() {
     <div class="student-row">
       <span class="s-name">${s.nom}${s.prenom ? ' '+s.prenom : ''}</span>
       <select onchange="setConstraint(${i},this.value)">
-        <option value=""        ${!s.constraint              ? 'selected':''}>Aléatoire</option>
-        <option value="tiers"   ${s.constraint==='tiers'     ? 'selected':''}>Tiers-temps (passe en dernier, +1/3 de la durée)</option>
-        <option value="premier" ${s.constraint==='premier'   ? 'selected':''}>Doit passer en premier (absolu)</option>
-        <option value="dernier" ${s.constraint==='dernier'   ? 'selected':''}>Doit passer en dernier (absolu)</option>
-        <option value="debut"   ${s.constraint==='debut'     ? 'selected':''}>Début de journée</option>
-        <option value="fin"     ${s.constraint==='fin'       ? 'selected':''}>Fin de journée</option>
-        <option value="pasp"    ${s.constraint==='pasp'      ? 'selected':''}>Ne pas passer en premier</option>
+        <option value=""              ${!s.constraint                  ? 'selected':''}>Aléatoire</option>
+        <option value="tiers-dernier" ${s.constraint==='tiers-dernier' ? 'selected':''}>Tiers-temps — passe en dernier</option>
+        <option value="tiers-premier" ${s.constraint==='tiers-premier' ? 'selected':''}>Tiers-temps — passe en premier</option>
+        <option value="premier"       ${s.constraint==='premier'       ? 'selected':''}>Doit passer en premier (absolu)</option>
+        <option value="dernier"       ${s.constraint==='dernier'       ? 'selected':''}>Doit passer en dernier (absolu)</option>
+        <option value="debut"         ${s.constraint==='debut'         ? 'selected':''}>Début de journée</option>
+        <option value="fin"           ${s.constraint==='fin'           ? 'selected':''}>Fin de journée</option>
+        <option value="pasp"          ${s.constraint==='pasp'          ? 'selected':''}>Ne pas passer en premier</option>
       </select>
       <span></span>
     </div>
   `).join('');
 }
 function setConstraint(i, v) { students[i].constraint = v || null; }
-function ctagLabel(c) { return c==='debut'?'Début':c==='fin'?'Fin':c==='pasp'?'Pas 1ᵉʳ':c==='premier'?'1ᵉʳ absolu':c==='dernier'?'Dernier absolu':c==='tiers'?'Tiers-temps':'–'; }
-function ctagClass(c) { return c==='debut'?'ctag-debut':c==='fin'?'ctag-fin':c==='pasp'?'ctag-pasp':c==='premier'?'ctag-premier':c==='dernier'?'ctag-dernier':c==='tiers'?'ctag-tiers':''; }
+function ctagLabel(c) { return c==='debut'?'Début':c==='fin'?'Fin':c==='pasp'?'Pas 1ᵉʳ':c==='premier'?'1ᵉʳ absolu':c==='dernier'?'Dernier absolu':c==='tiers-dernier'?'Tiers (dernier)':c==='tiers-premier'?'Tiers (premier)':'–'; }
+function ctagClass(c) { return c==='debut'?'ctag-debut':c==='fin'?'ctag-fin':c==='pasp'?'ctag-pasp':c==='premier'?'ctag-premier':c==='dernier'?'ctag-dernier':(c==='tiers-dernier'||c==='tiers-premier')?'ctag-tiers':''; }
 
 // ══════════════════════════════════════════════════════
 //  SCHEDULING
@@ -978,10 +1099,12 @@ function generate() {
   });
 
   // ── 1. Séparation des élèves ───────────────────────
-  const tiersStu   = shuffle(students.filter(s => s.constraint === 'tiers'));
-  const regularStu = students.filter(s => s.constraint !== 'tiers');
+  const tiersDernierStu = shuffle(students.filter(s => s.constraint === 'tiers-dernier'));
+  const tiersPremierStu = shuffle(students.filter(s => s.constraint === 'tiers-premier'));
+  const tiersStu        = [...tiersDernierStu, ...tiersPremierStu]; // tous les tiers
+  const regularStu      = students.filter(s => s.constraint !== 'tiers-dernier' && s.constraint !== 'tiers-premier');
 
-  // ── 2. Créneaux : exactement autant de slots que d'élèves ─
+  // ── 2. Créneaux réguliers ─────────────────────────
   const rawSlots = buildNSlots(validDays, daySessions, cfg, regularStu.length, oral, null, false);
 
   if (!rawSlots.length && !tiersStu.length) {
@@ -992,18 +1115,27 @@ function generate() {
     toast(`Attention : seulement ${rawSlots.length} créneau(x) disponibles pour ${regularStu.length} élèves réguliers. Ajoutez des jours.`, 'warn');
   }
 
-  // ── 3. Créneaux tiers-temps juste après le dernier créneau régulier ──
-  const afterRegular = rawSlots.length > 0 ? rawSlots[rawSlots.length - 1] : null;
-  const tiersSlots   = buildNSlots(validDays, daySessions, cfg, tiersStu.length, oralTiers, afterRegular, true);
+  // ── 3. Créneaux tiers-temps ───────────────────────
+  // Les tiers-premier passent avant les réguliers (créneaux en tête),
+  // les tiers-dernier passent après (créneaux en queue).
+  const tiersPSlots = buildNSlots(validDays, daySessions, cfg, tiersPremierStu.length, oralTiers, null, true);
+  // Les réguliers démarrent après les tiers-premier
+  const afterTP     = tiersPSlots.length > 0 ? tiersPSlots[tiersPSlots.length - 1] : null;
+  // rawSlots déjà calculé depuis null ; recalcul si tiers-premier existent
+  const rawSlotsAdj = tiersPremierStu.length > 0
+    ? buildNSlots(validDays, daySessions, cfg, regularStu.length, oral, afterTP, false)
+    : rawSlots;
+  const afterReg    = rawSlotsAdj.length > 0 ? rawSlotsAdj[rawSlotsAdj.length - 1] : afterTP;
+  const tiersDSlots = buildNSlots(validDays, daySessions, cfg, tiersDernierStu.length, oralTiers, afterReg, true);
 
-  if (tiersSlots.length < tiersStu.length) {
-    toast(`Attention : seulement ${tiersSlots.length} créneau(x) tiers-temps disponibles pour ${tiersStu.length} élèves. Ajoutez des jours.`, 'warn');
+  if (tiersPSlots.length < tiersPremierStu.length || tiersDSlots.length < tiersDernierStu.length) {
+    toast(`Attention : certains élèves tiers-temps n'ont pas pu être planifiés. Ajoutez des jours.`, 'warn');
   }
 
   // ── 4. Affectation des élèves réguliers avec contraintes ──
-  const dateSet = [...new Set(rawSlots.map(s => s.date))];
-  const firstIdx = dateSet.map(date => rawSlots.findIndex(s => s.date === date));
-  const lastIdx  = dateSet.map(date => { for (let i = rawSlots.length-1; i >= 0; i--) if (rawSlots[i].date === date) return i; return -1; });
+  const dateSet = [...new Set(rawSlotsAdj.map(s => s.date))];
+  const firstIdx = dateSet.map(date => rawSlotsAdj.findIndex(s => s.date === date));
+  const lastIdx  = dateSet.map(date => { for (let i = rawSlotsAdj.length-1; i >= 0; i--) if (rawSlotsAdj[i].date === date) return i; return -1; });
 
   const premierStu = shuffle(regularStu.filter(s => s.constraint === 'premier'));
   const dernierStu = shuffle(regularStu.filter(s => s.constraint === 'dernier'));
@@ -1012,16 +1144,16 @@ function generate() {
   const paspStu    = shuffle(regularStu.filter(s => s.constraint === 'pasp'));
   const freeStu    = shuffle(regularStu.filter(s => !s.constraint));
 
-  const assign  = new Array(rawSlots.length).fill(null);
+  const assign  = new Array(rawSlotsAdj.length).fill(null);
   const overflow = [];
 
   premierStu.forEach((stu, i) => {
-    if (i < rawSlots.length && assign[i] === null) assign[i] = stu;
+    if (i < rawSlotsAdj.length && assign[i] === null) assign[i] = stu;
     else overflow.push(stu);
   });
 
   dernierStu.forEach((stu, i) => {
-    const idx = rawSlots.length - 1 - i;
+    const idx = rawSlotsAdj.length - 1 - i;
     if (idx >= 0 && assign[idx] === null) assign[idx] = stu;
     else overflow.push(stu);
   });
@@ -1057,10 +1189,11 @@ function generate() {
   }
 
   // ── 5. Assemblage final ───────────────────────────
-  schedule = [
-    ...rawSlots.map((sl, i) => ({ ...sl, student: assign[i] || null })),
-    ...tiersSlots.map((sl, i) => ({ ...sl, student: tiersStu[i] || null }))
-  ];
+  const regEntries    = rawSlotsAdj.map((sl, i) => ({ ...sl, student: assign[i] || null }));
+  const tiersPEntries = tiersPSlots.map((sl, i) => ({ ...sl, student: tiersPremierStu[i] || null }));
+  const tiersDEntries = tiersDSlots.map((sl, i) => ({ ...sl, student: tiersDernierStu[i] || null }));
+  // Ordre chronologique : tiers-premier | réguliers | tiers-dernier
+  schedule = [...tiersPEntries, ...regEntries, ...tiersDEntries];
 
   goStep(4);
 }
@@ -1083,30 +1216,43 @@ function renderSchedule() {
   const total     = students.length;
   const nTiers    = schedule.filter(s => s.tiersTems).length;
 
-  // Stats + warnings
-  let html = `
-    <div class="btn-row" style="margin-bottom:1rem;">
-      <button class="btn btn-ghost" onclick="goStep(3)">← Modifier</button>
-      <button class="btn btn-ghost" onclick="generate()">🎲 Regénérer l'ordre</button>
-    </div>
+  // ── Conteneur principal ──
+  el.innerHTML = '';
+
+  // Boutons de tête
+  const btnRow = document.createElement('div');
+  btnRow.className = 'btn-row';
+  btnRow.style.marginBottom = '1rem';
+  btnRow.innerHTML = `
+    <button class="btn btn-ghost" onclick="goStep(3)">← Modifier</button>
+    <button class="btn btn-ghost" onclick="generate()">🎲 Regénérer l'ordre</button>
   `;
+  el.appendChild(btnRow);
 
-  if (total > assigned) html += `<div class="msg msg-warn">⚠ ${total - assigned} élève(s) non planifié(s) : créneaux insuffisants. Ajoutez des jours ou rallongez les horaires.</div>`;
+  if (total > assigned) {
+    const warn = document.createElement('div');
+    warn.className = 'msg msg-warn';
+    warn.textContent = `⚠ ${total - assigned} élève(s) non planifié(s) : créneaux insuffisants. Ajoutez des jours ou rallongez les horaires.`;
+    el.appendChild(warn);
+  }
 
-  html += `<div class="sched-wrap">`;
+  // Wrap principal
+  const wrap = document.createElement('div');
+  wrap.className = 'sched-wrap';
 
-  // Stats bar (inside the wrap, as header)
-  html += `
-    <div class="stats-bar">
-      <div class="stat"><span class="stat-val">${total}</span><span class="stat-lbl">élèves</span></div>
-      <div class="stat"><span class="stat-val">${assigned}</span><span class="stat-lbl">planifiés</span></div>
-      ${nTiers ? `<div class="stat"><span class="stat-val" style="color:#ffffff;">${nTiers}</span><span class="stat-lbl">tiers-temps</span></div>` : ''}
-      <div class="stat"><span class="stat-val" style="font-size:1.1rem;">${mat}</span><span class="stat-lbl">matière</span></div>
-      <span class="badge-type badge-${typ}">${typLabels[typ]}</span>
-    </div>
+  // Stats bar
+  const statsBar = document.createElement('div');
+  statsBar.className = 'stats-bar';
+  statsBar.innerHTML = `
+    <div class="stat"><span class="stat-val">${total}</span><span class="stat-lbl">élèves</span></div>
+    <div class="stat"><span class="stat-val">${assigned}</span><span class="stat-lbl">planifiés</span></div>
+    ${nTiers ? `<div class="stat"><span class="stat-val" style="color:#ffffff;">${nTiers}</span><span class="stat-lbl">tiers-temps</span></div>` : ''}
+    <div class="stat"><span class="stat-val" style="font-size:1.1rem;">${mat}</span><span class="stat-lbl">matière</span></div>
+    <span class="badge-type badge-${typ}">${typLabels[typ]}</span>
   `;
+  wrap.appendChild(statsBar);
 
-  // Group by date
+  // ── Rendu par jour ──
   const dates = [...new Set(schedule.map(s => s.date))];
   dates.forEach(date => {
     const daySlots = schedule.filter(s => s.date === date);
@@ -1114,98 +1260,176 @@ function renderSchedule() {
     const cap = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
     const n = daySlots.filter(s => s.student).length;
 
-    html += `<div class="day-block">`;
-    html += `<div class="day-hd"><span>${cap}</span><span>${n} candidat${n>1?'s':''}</span></div>`;
+    const dayBlock = document.createElement('div');
+    dayBlock.className = 'day-block';
+
+    const dayHd = document.createElement('div');
+    dayHd.className = 'day-hd';
+    dayHd.innerHTML = `<span>${cap}</span><span>${n} candidat${n>1?'s':''}</span>`;
+    dayBlock.appendChild(dayHd);
 
     let prevSess = null;
     let prevIsTT = null;
     let rankInSess = 0;
 
-    daySlots.forEach((sl) => {
-      const isTT = !!sl.tiersTems;
+    daySlots.forEach(sl => {
+      const slIdx = schedule.indexOf(sl);
+      const isTT  = !!sl.tiersTems;
 
-      // Changement de session (matin → après-midi)
       if (sl.sess !== prevSess) {
         if (prevSess === 'morning' && sl.sess === 'afternoon') {
-          html += `
-            <div class="lunch-row">
-              <div class="lunch-time">${toHM(sl.midiStart)} – ${toHM(sl.midiEnd)}</div>
-              <div class="lunch-label">🍽 Pause méridienne</div>
-            </div>
-          `;
+          const lunchRow = document.createElement('div');
+          lunchRow.className = 'lunch-row';
+          lunchRow.innerHTML = `
+            <div class="lunch-time">${toHM(sl.midiStart)} – ${toHM(sl.midiEnd)}</div>
+            <div class="lunch-label">🍽 Pause méridienne</div>`;
+          dayBlock.appendChild(lunchRow);
         }
-        prevSess = sl.sess;
-        prevIsTT = null;
+        prevSess  = sl.sess;
+        prevIsTT  = null;
         rankInSess = 0;
         if (!isTT) {
-          const sesLabel = sl.sess === 'morning' ? '🌅 Matin' : '🌆 Après-midi';
-          html += `<div class="session-hd ${sl.sess}">${sesLabel}</div>`;
+          const shd = document.createElement('div');
+          shd.className = `session-hd ${sl.sess}`;
+          shd.textContent = sl.sess === 'morning' ? '🌅 Matin' : '🌆 Après-midi';
+          dayBlock.appendChild(shd);
         }
       }
 
-      // Séparateur avant le premier créneau tiers-temps
       if (isTT && !prevIsTT) {
         const oralNorm = parseInt(document.getElementById('dureeOral').value) || 20;
         const oralTT   = Math.ceil(oralNorm * 4 / 3);
-        html += `<div class="session-hd tiers">⏳ Tiers-temps — durée : ${oralTT} min</div>`;
+        const thd = document.createElement('div');
+        thd.className = 'session-hd tiers';
+        thd.textContent = `⏳ Tiers-temps — durée : ${oralTT} min`;
+        dayBlock.appendChild(thd);
         rankInSess = 0;
       }
       prevIsTT = isTT;
       rankInSess++;
 
+      // ── Ligne créneau ──
+      const row = document.createElement('div');
+      row.className = 'slot-row' + (isTT ? ' tt-row' : '');
+      row.dataset.idx = slIdx;
+
+      if (sl.student) {
+        row.setAttribute('draggable', 'true');
+        row.addEventListener('dragstart', onDragStart);
+        row.addEventListener('dragover',  onDragOver);
+        row.addEventListener('dragleave', onDragLeave);
+        row.addEventListener('drop',      onDrop);
+        row.addEventListener('dragend',   onDragEnd);
+      }
+
       const ctagsNorm = (!isTT && sl.student && sl.student.constraint)
         ? `<span class="ctag ${ctagClass(sl.student.constraint)}">${ctagLabel(sl.student.constraint)}</span>`
         : '';
 
-      html += `
-        <div class="slot-row${isTT ? ' tt-row' : ''}">
-          <div class="slot-time">${toHM(sl.s)} – ${toHM(sl.e)}</div>
-          <div class="slot-student">
-            ${sl.student
-              ? `<span class="slot-name">${sl.student.nom}${sl.student.prenom ? ' ' + sl.student.prenom : ''}</span>
-                 ${isTT
-                   ? `<span class="ctag ctag-tiers">Tiers-temps</span><span class="tiers-dur">${sl.oral} min</span>`
-                   : ctagsNorm}`
-              : `<span class="slot-vacant">— créneau vacant —</span>`
-            }
-          </div>
-          <div class="slot-idx">#${rankInSess}</div>
+      row.innerHTML = `
+        <div class="slot-time">${toHM(sl.s)} – ${toHM(sl.e)}</div>
+        <div class="slot-student" style="display:flex;align-items:center;gap:0.5rem;">
+          ${sl.student ? `<span class="drag-handle" title="Glisser pour déplacer">⠿</span>` : ''}
+          ${sl.student
+            ? `<span class="slot-name">${sl.student.nom}${sl.student.prenom ? ' ' + sl.student.prenom : ''}</span>
+               ${isTT
+                 ? `<span class="ctag ctag-tiers">Tiers-temps</span><span class="tiers-dur">${sl.oral} min</span>`
+                 : ctagsNorm}`
+            : `<span class="slot-vacant">— créneau vacant —</span>`}
         </div>
+        <div class="slot-idx">#${rankInSess}</div>
       `;
 
+      dayBlock.appendChild(row);
+
       if (sl.brkAfter && sl.brk) {
-        html += `
-          <div class="break-row">
-            <div class="break-time">${toHM(sl.e)} – ${toHM(sl.e + sl.brk)}</div>
-            <div class="break-label">⏸ Pause — ${sl.brk} min</div>
-          </div>
-        `;
+        const brk = document.createElement('div');
+        brk.className = 'break-row';
+        brk.innerHTML = `
+          <div class="break-time">${toHM(sl.e)} – ${toHM(sl.e + sl.brk)}</div>
+          <div class="break-label">⏸ Pause — ${sl.brk} min</div>`;
+        dayBlock.appendChild(brk);
       }
     });
 
-    html += `</div>`;
+    wrap.appendChild(dayBlock);
   });
 
-  html += `</div>`; // .sched-wrap
+  el.appendChild(wrap);
 
-  // Export section
-  html += `
-    <div class="export-card">
-      <div style="font-family:'Libre Baskerville',serif;font-size:0.95rem;font-weight:700;color:var(--accent);margin-bottom:0.9rem;">📤 Export</div>
-      <div class="btn-row">
-        <button class="btn btn-success" onclick="exportCSV()">⬇ Télécharger CSV</button>
-        <button class="btn btn-ghost" onclick="copyTSV()">📋 Copier pour Google Sheets</button>
-      </div>
-      <div id="exportMsg" style="margin-top:0.75rem;"></div>
-      <details style="margin-top:1rem;">
-        <summary>Comment importer dans Google Sheets ?</summary>
-        <p><strong>Option 1 – CSV :</strong> télécharger le CSV, puis dans Sheets : <em>Fichier → Importer → Importer le fichier → Remplacer la feuille de calcul.</em></p>
-        <p style="margin-top:0.4rem;"><strong>Option 2 – Copier-coller :</strong> cliquer « Copier pour Google Sheets », ouvrir une feuille vierge, cliquer sur la cellule A1, puis coller (Ctrl+V ou Cmd+V).</p>
-      </details>
+  // Export
+  const exportCard = document.createElement('div');
+  exportCard.className = 'export-card';
+  exportCard.innerHTML = `
+    <div style="font-family:'Libre Baskerville',serif;font-size:0.95rem;font-weight:700;color:var(--accent);margin-bottom:0.9rem;">📤 Export</div>
+    <div class="btn-row">
+      <button class="btn btn-success" onclick="exportCSV()">⬇ Télécharger CSV</button>
+      <button class="btn btn-ghost" onclick="copyTSV()">📋 Copier pour Google Sheets</button>
     </div>
+    <div id="exportMsg" style="margin-top:0.75rem;"></div>
+    <details style="margin-top:1rem;">
+      <summary>Comment importer dans Google Sheets ?</summary>
+      <p><strong>Option 1 – CSV :</strong> télécharger le CSV, puis dans Sheets : <em>Fichier → Importer → Importer le fichier → Remplacer la feuille de calcul.</em></p>
+      <p style="margin-top:0.4rem;"><strong>Option 2 – Copier-coller :</strong> cliquer « Copier pour Google Sheets », ouvrir une feuille vierge, cliquer sur la cellule A1, puis coller (Ctrl+V ou Cmd+V).</p>
+    </details>
   `;
+  el.appendChild(exportCard);
+}
 
-  el.innerHTML = html;
+// ══════════════════════════════════════════════════════
+//  DRAG-AND-DROP (échange de .student entre créneaux)
+// ══════════════════════════════════════════════════════
+let dragSrcIdx = null;
+
+function onDragStart(e) {
+  dragSrcIdx = parseInt(this.dataset.idx);
+  this.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (parseInt(this.dataset.idx) !== dragSrcIdx) this.classList.add('drag-over');
+}
+function onDragLeave() { this.classList.remove('drag-over'); }
+function onDrop(e) {
+  e.preventDefault();
+  this.classList.remove('drag-over');
+  const tgtIdx = parseInt(this.dataset.idx);
+  if (dragSrcIdx === null || tgtIdx === dragSrcIdx) return;
+
+  // Extraire les propriétés "personne" du créneau source
+  const srcStudent   = schedule[dragSrcIdx].student;
+  const srcTiersTems = schedule[dragSrcIdx].tiersTems;
+  const srcOral      = schedule[dragSrcIdx].oral;
+
+  // Décaler les créneaux situés entre src et tgt (d'un rang vers la source)
+  if (dragSrcIdx < tgtIdx) {
+    for (let i = dragSrcIdx; i < tgtIdx; i++) {
+      schedule[i].student   = schedule[i+1].student;
+      schedule[i].tiersTems = schedule[i+1].tiersTems;
+      schedule[i].oral      = schedule[i+1].oral;
+    }
+  } else {
+    for (let i = dragSrcIdx; i > tgtIdx; i--) {
+      schedule[i].student   = schedule[i-1].student;
+      schedule[i].tiersTems = schedule[i-1].tiersTems;
+      schedule[i].oral      = schedule[i-1].oral;
+    }
+  }
+
+  // Placer l'élève glissé à la position cible
+  schedule[tgtIdx].student   = srcStudent;
+  schedule[tgtIdx].tiersTems = srcTiersTems;
+  schedule[tgtIdx].oral      = srcOral;
+
+  renderSchedule();
+}
+function onDragEnd() {
+  document.querySelectorAll('.slot-row').forEach(r => {
+    r.classList.remove('dragging', 'drag-over');
+  });
+  dragSrcIdx = null;
 }
 
 // ══════════════════════════════════════════════════════
