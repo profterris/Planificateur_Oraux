@@ -1057,6 +1057,7 @@ function buildNSlots(validDays, daySessions, cfg, n, oralDur, afterSlot, isTiers
           date, sess,
           s: ct, e: ct + oralDur,
           oral: oralDur,
+          trans,
           brk:      i === brkIdx ? brk : 0,
           brkAfter: i === brkIdx,
           midiStart, midiEnd,
@@ -1316,11 +1317,12 @@ function renderSchedule() {
       if (sl.student) {
         row.setAttribute('draggable', 'true');
         row.addEventListener('dragstart', onDragStart);
-        row.addEventListener('dragover',  onDragOver);
-        row.addEventListener('dragleave', onDragLeave);
-        row.addEventListener('drop',      onDrop);
-        row.addEventListener('dragend',   onDragEnd);
       }
+      // Toutes les lignes acceptent les drops (élève ou pause)
+      row.addEventListener('dragover',  onDragOver);
+      row.addEventListener('dragleave', onDragLeave);
+      row.addEventListener('drop',      onDrop);
+      row.addEventListener('dragend',   onDragEnd);
 
       const ctagsNorm = (!isTT && sl.student && sl.student.constraint)
         ? `<span class="ctag ${ctagClass(sl.student.constraint)}">${ctagLabel(sl.student.constraint)}</span>`
@@ -1343,12 +1345,23 @@ function renderSchedule() {
       dayBlock.appendChild(row);
 
       if (sl.brkAfter && sl.brk) {
-        const brk = document.createElement('div');
-        brk.className = 'break-row';
-        brk.innerHTML = `
+        const brkRow = document.createElement('div');
+        brkRow.className = 'break-row';
+        brkRow.setAttribute('draggable', 'true');
+        brkRow.dataset.breakIdx = slIdx; // index du slot après lequel la pause est placée
+        brkRow.style.cursor = 'grab';
+        brkRow.innerHTML = `
           <div class="break-time">${toHM(sl.e)} – ${toHM(sl.e + sl.brk)}</div>
-          <div class="break-label">⏸ Pause — ${sl.brk} min</div>`;
-        dayBlock.appendChild(brk);
+          <div class="break-label" style="display:flex;align-items:center;gap:0.5rem;">
+            <span style="color:var(--border);font-size:0.9rem;">⠿</span>
+            ⏸ Pause — ${sl.brk} min
+          </div>`;
+        brkRow.addEventListener('dragstart', onBreakDragStart);
+        brkRow.addEventListener('dragover',  onDragOver);
+        brkRow.addEventListener('dragleave', onDragLeave);
+        brkRow.addEventListener('drop',      onBreakDropOnBreak);
+        brkRow.addEventListener('dragend',   onDragEnd);
+        dayBlock.appendChild(brkRow);
       }
     });
 
@@ -1377,33 +1390,42 @@ function renderSchedule() {
 }
 
 // ══════════════════════════════════════════════════════
-//  DRAG-AND-DROP (échange de .student entre créneaux)
+//  DRAG-AND-DROP
 // ══════════════════════════════════════════════════════
-let dragSrcIdx = null;
+let dragSrcIdx   = null; // index slot (élève)
+let dragBreakIdx = null; // index slot dont brkAfter=true (pause)
 
+// ── Élève ──────────────────────────────────────────
 function onDragStart(e) {
-  dragSrcIdx = parseInt(this.dataset.idx);
+  dragSrcIdx   = parseInt(this.dataset.idx);
+  dragBreakIdx = null;
   this.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
 }
+
 function onDragOver(e) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  if (parseInt(this.dataset.idx) !== dragSrcIdx) this.classList.add('drag-over');
+  const thisIdx = this.dataset.idx !== undefined
+    ? parseInt(this.dataset.idx)
+    : parseInt(this.dataset.breakIdx);
+  if (dragSrcIdx !== null && thisIdx !== dragSrcIdx) this.classList.add('drag-over');
+  if (dragBreakIdx !== null && thisIdx !== dragBreakIdx) this.classList.add('drag-over');
 }
+
 function onDragLeave() { this.classList.remove('drag-over'); }
+
 function onDrop(e) {
   e.preventDefault();
   this.classList.remove('drag-over');
+  if (dragBreakIdx !== null) { moveBreakToSlot(parseInt(this.dataset.idx)); return; }
   const tgtIdx = parseInt(this.dataset.idx);
   if (dragSrcIdx === null || tgtIdx === dragSrcIdx) return;
 
-  // Extraire les propriétés "personne" du créneau source
   const srcStudent   = schedule[dragSrcIdx].student;
   const srcTiersTems = schedule[dragSrcIdx].tiersTems;
   const srcOral      = schedule[dragSrcIdx].oral;
 
-  // Décaler les créneaux situés entre src et tgt (d'un rang vers la source)
   if (dragSrcIdx < tgtIdx) {
     for (let i = dragSrcIdx; i < tgtIdx; i++) {
       schedule[i].student   = schedule[i+1].student;
@@ -1417,19 +1439,84 @@ function onDrop(e) {
       schedule[i].oral      = schedule[i-1].oral;
     }
   }
-
-  // Placer l'élève glissé à la position cible
   schedule[tgtIdx].student   = srcStudent;
   schedule[tgtIdx].tiersTems = srcTiersTems;
   schedule[tgtIdx].oral      = srcOral;
 
   renderSchedule();
 }
+
+// ── Pause ──────────────────────────────────────────
+function onBreakDragStart(e) {
+  dragBreakIdx = parseInt(this.dataset.breakIdx);
+  dragSrcIdx   = null;
+  this.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+// Drop d'une pause sur une ligne de pause (échange de pauses — cas rare)
+function onBreakDropOnBreak(e) {
+  e.preventDefault();
+  this.classList.remove('drag-over');
+  if (dragBreakIdx === null) { onDrop.call(this, e); return; }
+  // Même slot → rien
+  const tgtBreak = parseInt(this.dataset.breakIdx);
+  if (tgtBreak === dragBreakIdx) return;
+  // Déplacer la pause source à la position de la pause cible
+  moveBreakToSlot(tgtBreak);
+}
+
+// Déplace la pause (brkAfter + brk) depuis dragBreakIdx vers newSlotIdx
+function moveBreakToSlot(newSlotIdx) {
+  if (dragBreakIdx === null || newSlotIdx === dragBreakIdx) { dragBreakIdx = null; return; }
+  const brkDur = schedule[dragBreakIdx].brk;
+  // Retirer la pause du slot source
+  schedule[dragBreakIdx].brkAfter = false;
+  schedule[dragBreakIdx].brk      = 0;
+  // La placer sur le slot cible (en écrasant une éventuelle pause existante)
+  schedule[newSlotIdx].brkAfter = true;
+  schedule[newSlotIdx].brk      = brkDur;
+  dragBreakIdx = null;
+  recomputeTimes();
+  renderSchedule();
+}
+
+// Recalcule s et e de chaque créneau après un déplacement de pause
+function recomputeTimes() {
+  // Grouper par (date, sess) dans l'ordre du planning
+  const seen = [];
+  schedule.forEach(sl => {
+    const key = sl.date + '|' + sl.sess;
+    if (!seen.includes(key)) seen.push(key);
+  });
+
+  seen.forEach(key => {
+    const [date, sess] = key.split('|');
+    const sessSlots = schedule.filter(s => s.date === date && s.sess === sess);
+    // Trouver l'heure de début de la session depuis le premier créneau (midiStart/start)
+    const first = sessSlots[0];
+    const sessStart = sess === 'morning' ? first.s : first.s; // on garde le début original du 1er créneau
+    // Recalculer en chaîne à partir de sessStart
+    // Mais on doit partir de l'heure de début de session, pas du premier s actuel
+    // Le début de session est stocké dans midiEnd/midiStart — pour morning c'est cfg.start, pour afternoon cfg.midiEnd
+    // Plus simple : le 1er créneau conserve son s (ancre de session), on recalcule les suivants
+    let cursor = first.s;
+    sessSlots.forEach((sl, i) => {
+      const trans = sl.trans || 0;
+      sl.s = cursor;
+      sl.e = cursor + sl.oral;
+      cursor = sl.e + trans;
+      if (sl.brkAfter && sl.brk) cursor += sl.brk;
+    });
+  });
+}
+
 function onDragEnd() {
-  document.querySelectorAll('.slot-row').forEach(r => {
+  document.querySelectorAll('.slot-row, .break-row').forEach(r => {
     r.classList.remove('dragging', 'drag-over');
   });
-  dragSrcIdx = null;
+  dragSrcIdx   = null;
+  dragBreakIdx = null;
 }
 
 // ══════════════════════════════════════════════════════
